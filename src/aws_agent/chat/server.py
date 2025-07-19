@@ -22,12 +22,20 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(title="AWS Agent Chat", version="0.1.0")
 
-# Add CORS middleware
+# Add CORS middleware with restricted origins
+# In production, replace these with your actual domain
+allowed_origins = [
+    "http://localhost:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -592,7 +600,7 @@ async def chat_endpoint(message: dict):
         # Get or create agent for session
         if session_id not in agents:
             credential_manager = AWSCredentialManager()
-            agents[session_id] = CustomAWSAgent(credential_manager=credential_manager)
+            agents[session_id] = SimpleAWSAgent(credential_manager=credential_manager)
         
         agent = agents[session_id]
         

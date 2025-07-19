@@ -6,6 +6,8 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 import mimetypes
 
 from .base import S3BaseTool
+from .progress import ProgressPercentage, format_bytes
+from .validators import validate_bucket_name, validate_object_key
 
 
 class UploadToS3Input(BaseModel):
@@ -35,10 +37,11 @@ class UploadToS3Tool(S3BaseTool):
     ) -> str:
         """Upload file to S3."""
         try:
-            # Strip trailing slashes from bucket name
-            bucket = bucket.rstrip('/')
+            # Validate inputs
+            bucket = validate_bucket_name(bucket)
+            key = validate_object_key(key)
             
-            local_file = Path(local_path)
+            local_file = Path(local_path).expanduser()
             
             # Validate local file exists
             if not local_file.exists():
@@ -49,26 +52,32 @@ class UploadToS3Tool(S3BaseTool):
             
             s3_client = self._get_s3_client(profile)
             
+            # Get file size
+            file_size = local_file.stat().st_size
+            
             # Determine content type
             content_type, _ = mimetypes.guess_type(str(local_file))
             extra_args = {}
             if content_type:
                 extra_args['ContentType'] = content_type
             
-            # Upload file
+            # Create progress callback
+            progress_callback = None
+            if file_size > 1024 * 1024:  # Show progress for files > 1MB
+                progress_callback = ProgressPercentage(str(local_file.name), file_size)
+            
+            # Upload file with progress
             s3_client.upload_file(
                 str(local_file),
                 bucket,
                 key,
-                ExtraArgs=extra_args
+                ExtraArgs=extra_args,
+                Callback=progress_callback
             )
-            
-            # Get file size
-            file_size = local_file.stat().st_size
             
             return (
                 f"Successfully uploaded '{local_path}' to s3://{bucket}/{key}\n"
-                f"File size: {file_size:,} bytes\n"
+                f"File size: {format_bytes(file_size)}\n"
                 f"Content type: {content_type or 'binary/octet-stream'}\n"
                 f"Profile: {profile or self.profile or 'default'}"
             )
