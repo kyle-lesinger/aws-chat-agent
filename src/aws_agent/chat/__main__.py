@@ -1,6 +1,7 @@
 """Run the AWS Agent chat server."""
 
 import logging
+import sys
 from .server import start_server
 
 
@@ -11,4 +12,6 @@ logging.basicConfig(
 
 
 if __name__ == "__main__":
-    start_server()
+    # Check for --no-browser flag
+    no_browser = '--no-browser' in sys.argv
+    start_server(no_browser=no_browser)

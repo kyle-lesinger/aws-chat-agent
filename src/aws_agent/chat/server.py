@@ -628,9 +628,27 @@ async def get_profiles():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
+def start_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False, no_browser: bool = False):
     """Start the chat server."""
+    import webbrowser
+    import threading
+    import time
+    
     logger.info(f"Starting AWS Agent Chat Server on {host}:{port}")
+    
+    # Function to open browser after a short delay
+    def open_browser():
+        time.sleep(1.5)  # Give the server time to start
+        url = f"http://localhost:{port}"
+        logger.info(f"Opening browser at {url}")
+        webbrowser.open(url)
+    
+    # Start browser opening in a separate thread
+    if not reload and not no_browser:  # Don't open browser on reload or if disabled
+        browser_thread = threading.Thread(target=open_browser)
+        browser_thread.daemon = True
+        browser_thread.start()
+    
     uvicorn.run(
         "aws_agent.chat.server:app",
         host=host,
