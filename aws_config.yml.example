@@ -1,0 +1,84 @@
+# AWS Agent Configuration Example
+# Copy this file to aws_config.yml and update with your settings
+# IMPORTANT: Never commit aws_config.yml with real credentials!
+
+# Default AWS profile to use
+default_profile: default
+
+# AWS Profile configurations
+profiles:
+  # Example profile using direct credentials
+  default:
+    access_key_id: YOUR_ACCESS_KEY_HERE
+    secret_access_key: YOUR_SECRET_KEY_HERE
+    region: us-east-1
+    # Optional session token for temporary credentials
+    # session_token: YOUR_SESSION_TOKEN_HERE
+
+  # Example profile using AWS CLI profile
+  production:
+    use_aws_profile: true
+    aws_profile_name: prod
+    region: us-west-2
+
+# Agent configuration
+agent:
+  # LLM model to use
+  model: gpt-3.5-turbo
+  # OpenAI API key - REQUIRED
+  # Option 1: Set the OPENAI_API_KEY environment variable
+  # Option 2: Uncomment and set your key here (NOT RECOMMENDED for public repos)
+  # openai_api_key: sk-YOUR_OPENAI_API_KEY_HERE
+  # Temperature for LLM responses (0-1)
+  temperature: 0
+  # Maximum retries for failed operations
+  max_retries: 3
+  # Request timeout in seconds
+  timeout: 30
+
+# Service-specific settings
+s3:
+  # Default bucket for operations
+  default_bucket: null
+  # Multipart upload threshold (bytes or human-readable)
+  multipart_threshold: 100MB
+  # Multipart chunk size
+  multipart_chunksize: 10MB
+  # Enable transfer acceleration
+  use_accelerate_endpoint: false
+
+ec2:
+  # Default instance type for new instances
+  default_instance_type: t3.micro
+  # Default AMI (leave null to use latest Amazon Linux 2)
+  default_ami: null
+  # Default security group
+  default_security_group: default
+
+lambda:
+  # Default runtime for new functions
+  default_runtime: python3.9
+  # Default timeout in seconds
+  default_timeout: 300
+  # Default memory in MB
+  default_memory: 512
+
+# Chat server settings
+chat:
+  # Host to bind to
+  host: 0.0.0.0
+  # Port to listen on
+  port: 8000
+  # Enable WebSocket compression
+  compression: true
+  # Maximum message size (bytes)
+  max_message_size: 1048576
+
+# Logging configuration
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  level: INFO
+  # Log format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # Log file (null for stdout only)
+  file: null
