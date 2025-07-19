@@ -1,0 +1,58 @@
+# Terminal Configuration for AWS Agent
+
+terminal:
+  # Enable or disable terminal feature
+  enabled: true
+  
+  # Maximum number of concurrent terminal sessions per user
+  max_sessions: 5
+  
+  # Session timeout in minutes (idle sessions will be closed)
+  session_timeout: 30
+  
+  # Security settings
+  security:
+    # Command whitelist (if specified, only these commands are allowed)
+    # Leave empty to allow all commands
+    allowed_commands: []
+    # Example whitelist:
+    # allowed_commands:
+    #   - ls
+    #   - cd
+    #   - pwd
+    #   - aws
+    #   - python
+    #   - node
+    #   - npm
+    #   - git
+    
+    # Command blacklist (these commands are always blocked)
+    blocked_commands:
+      - rm -rf /
+      - rm -rf /*
+      - shutdown
+      - reboot
+      - halt
+      - systemctl poweroff
+      
+    # Environment variables to remove from terminal sessions
+    blocked_env_vars:
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - OPENAI_API_KEY
+      
+  # Terminal appearance
+  appearance:
+    rows: 24
+    cols: 80
+    font_size: 14
+    cursor_blink: true
+    
+  # Resource limits
+  limits:
+    # Maximum CPU time in seconds (0 = unlimited)
+    cpu_time: 0
+    # Maximum memory in MB (0 = unlimited)
+    memory: 512
+    # Maximum number of processes
+    max_processes: 50
