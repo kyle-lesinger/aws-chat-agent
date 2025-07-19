@@ -8,6 +8,7 @@ A specialized AWS agent built with LangChain and LangGraph for comprehensive AWS
 - 🔐 **Secure Credential Management**: Support for multiple AWS credential sources
 - 📁 **S3 File Operations**: Upload, download, list, and manage S3 objects
 - 💬 **Interactive Chat Interface**: Real-time WebSocket-based chat with command history
+- 🖥️ **Integrated Terminal**: Full terminal emulator with security controls
 - 🚀 **Built with LangChain/LangGraph**: Modern agentic architecture
 - 📊 **Multi-profile Support**: Switch between different AWS profiles seamlessly
 - 🎯 **NASA Logo Integration**: Customizable branding support
@@ -232,6 +233,20 @@ aws-agent upload ./local-file.txt s3://bucket/path/
 - No need to restart the server
 - Profile dropdown shows all available profiles
 
+#### Integrated Terminal
+- Full terminal emulator in the browser
+- Tabbed interface (Chat | Terminal)
+- Security controls with command filtering
+- Session management and timeout
+- Customizable through `terminal_config.yml`
+
+Terminal features:
+- **xterm.js** based terminal emulator
+- Full TTY support with proper ANSI escape sequences
+- Copy/paste support
+- Automatic session cleanup
+- Environment variable sanitization
+
 ## Customization
 
 ### Logo Customization
@@ -244,6 +259,27 @@ To add your own logo:
 ```html
 <img src="/static/images/your-logo.png" alt="Your Logo" class="logo-img">
 ```
+
+### Terminal Configuration
+
+Edit `terminal_config.yml` to customize terminal behavior:
+
+```yaml
+terminal:
+  enabled: true
+  max_sessions: 5
+  session_timeout: 30
+  security:
+    allowed_commands: []  # Empty = all commands allowed
+    blocked_commands:     # Always blocked
+      - rm -rf /
+      - shutdown
+```
+
+Security options:
+- **Whitelist mode**: Set `allowed_commands` to restrict to specific commands
+- **Blacklist mode**: Use `blocked_commands` to block dangerous commands
+- **Environment sanitization**: Sensitive env vars are automatically removed
 
 ### Adding New AWS Services
 

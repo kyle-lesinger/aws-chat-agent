@@ -7,6 +7,7 @@ import logging
 import asyncio
 
 from ..core.simple_agent import SimpleAWSAgent
+from .terminal import TerminalManager
 
 
 logger = logging.getLogger(__name__)
@@ -47,9 +48,12 @@ class ConnectionManager:
 class WebSocketHandler:
     """Handle WebSocket messages for AWS Agent."""
     
-    def __init__(self, agent: SimpleAWSAgent, websocket: WebSocket):
+    def __init__(self, agent: SimpleAWSAgent, websocket: WebSocket, 
+                 terminal_manager: Optional[TerminalManager] = None, session_id: str = None):
         self.agent = agent
         self.websocket = websocket
+        self.terminal_manager = terminal_manager
+        self.session_id = session_id
     
     async def handle_message(self, data: dict):
         """Handle incoming WebSocket message."""
@@ -64,6 +68,14 @@ class WebSocketHandler:
                 await self._handle_set_profile(data)
             elif message_type == "get_history":
                 await self._handle_get_history()
+            elif message_type == "terminal_create":
+                await self._handle_terminal_create(data)
+            elif message_type == "terminal_input":
+                await self._handle_terminal_input(data)
+            elif message_type == "terminal_resize":
+                await self._handle_terminal_resize(data)
+            elif message_type == "terminal_close":
+                await self._handle_terminal_close(data)
             else:
                 await self._send_error(f"Unknown message type: {message_type}")
                 
@@ -160,3 +172,79 @@ class WebSocketHandler:
             "type": "error",
             "content": error
         })
+    
+    async def _handle_terminal_create(self, data: dict):
+        """Handle terminal creation request."""
+        if not self.terminal_manager:
+            await self._send_error("Terminal feature is not enabled")
+            return
+        
+        try:
+            rows = data.get("rows", 24)
+            cols = data.get("cols", 80)
+            
+            # Create output callback
+            async def terminal_output(output: str):
+                await self.websocket.send_json({
+                    "type": "terminal_output",
+                    "session_id": session_id,
+                    "data": output
+                })
+            
+            # Create terminal session
+            session_id = await self.terminal_manager.create_session(
+                self.session_id, terminal_output, rows, cols
+            )
+            
+            logger.info(f"Created terminal session {session_id} with size {rows}x{cols}")
+            
+            await self.websocket.send_json({
+                "type": "terminal_created",
+                "session_id": session_id
+            })
+            
+        except Exception as e:
+            await self._send_error(f"Failed to create terminal: {e}")
+    
+    async def _handle_terminal_input(self, data: dict):
+        """Handle terminal input."""
+        if not self.terminal_manager:
+            return
+        
+        session_id = data.get("session_id")
+        input_data = data.get("data", "")
+        
+        try:
+            await self.terminal_manager.write_to_session(session_id, input_data)
+        except Exception as e:
+            await self._send_error(f"Terminal input error: {e}")
+    
+    async def _handle_terminal_resize(self, data: dict):
+        """Handle terminal resize."""
+        if not self.terminal_manager:
+            return
+        
+        session_id = data.get("session_id")
+        rows = data.get("rows", 24)
+        cols = data.get("cols", 80)
+        
+        try:
+            self.terminal_manager.resize_session(session_id, rows, cols)
+        except Exception as e:
+            await self._send_error(f"Terminal resize error: {e}")
+    
+    async def _handle_terminal_close(self, data: dict):
+        """Handle terminal close."""
+        if not self.terminal_manager:
+            return
+        
+        session_id = data.get("session_id")
+        
+        try:
+            await self.terminal_manager.close_session(session_id)
+            await self.websocket.send_json({
+                "type": "terminal_closed",
+                "session_id": session_id
+            })
+        except Exception as e:
+            await self._send_error(f"Terminal close error: {e}")

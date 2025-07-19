@@ -14,6 +14,7 @@ import uvicorn
 from ..core.simple_agent import SimpleAWSAgent
 from ..credentials.manager import AWSCredentialManager
 from .websocket import WebSocketHandler, ConnectionManager
+from .terminal import TerminalManager
 
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,27 @@ connection_manager = ConnectionManager()
 # Agent instances per session
 agents: Dict[str, SimpleAWSAgent] = {}
 
+# Terminal manager
+terminal_manager = TerminalManager(max_sessions=5, session_timeout=30)
+
 # Mount static files directory
 static_dir = Path(__file__).parent.parent.parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start terminal manager on startup."""
+    await terminal_manager.start()
+    logger.info("Terminal manager started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop terminal manager on shutdown."""
+    await terminal_manager.stop()
+    logger.info("Terminal manager stopped")
 
 
 @app.get("/")
@@ -50,6 +68,9 @@ async def get_home():
     <html>
     <head>
         <title>AWS Agent Chat</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+        <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
         <style>
             body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
             .container { max-width: 800px; margin: 0 auto; }
@@ -109,8 +130,47 @@ async def get_home():
             button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
             button:hover { background: #0056b3; }
             .status { text-align: center; padding: 10px; color: #666; }
-            .profile-selector { margin-bottom: 20px; }
-            select { padding: 5px 10px; border-radius: 5px; border: 1px solid #ddd; }
+            .profile-section { background: #fff3e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .profile-section h3 { margin-top: 0; color: #f57c00; font-size: 18px; font-weight: bold; }
+            .profile-selector { display: flex; align-items: center; gap: 10px; }
+            .profile-selector label { font-size: 16px; font-weight: bold; color: #e65100; }
+            .profile-selector select { 
+                padding: 10px 15px; 
+                border-radius: 5px; 
+                border: 2px solid #ff9800; 
+                font-size: 16px; 
+                font-weight: bold;
+                background: white;
+                color: #333;
+                cursor: pointer;
+                min-width: 200px;
+            }
+            .profile-selector select:hover { 
+                background: #fff3e0; 
+                border-color: #f57c00;
+            }
+            .profile-selector select:focus { 
+                outline: none;
+                border-color: #e65100;
+                box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.2);
+            }
+            
+            /* Tab interface */
+            .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
+            .tab { padding: 10px 20px; cursor: pointer; background: #f0f0f0; border: 1px solid #ddd; border-bottom: none; margin-right: 5px; border-radius: 5px 5px 0 0; }
+            .tab.active { background: white; border-bottom: 1px solid white; margin-bottom: -1px; }
+            .tab-content { display: none; }
+            .tab-content.active { display: block; }
+            
+            /* Terminal styles */
+            .terminal-container { background: #1e1e1e; border-radius: 8px; padding: 10px; height: 500px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+            .terminal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+            .terminal-title { color: #ccc; font-size: 14px; }
+            .terminal-controls { display: flex; gap: 10px; }
+            .terminal-btn { padding: 5px 10px; background: #333; color: #ccc; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
+            .terminal-btn:hover { background: #444; }
+            #terminal { height: calc(100% - 40px); }
+            .terminal-status { color: #666; font-size: 12px; margin-top: 5px; }
         </style>
     </head>
     <body>
@@ -137,19 +197,47 @@ async def get_home():
                     <div class="operation" onclick="useOperation('save objects within bucket veda-data-store-dev/path/ into my ~/tmp directory')"><span class="category">Example:</span> download S3 directory</div>
                 </div>
             </div>
-            <div class="profile-selector">
-                <label>AWS Profile: 
+            <div class="profile-section">
+                <h3>AWS Profile Configuration</h3>
+                <div class="profile-selector">
+                    <label>Active Profile:</label>
                     <select id="profileSelect">
                         <option value="default">default</option>
                     </select>
-                </label>
+                </div>
             </div>
-            <div class="chat-box" id="chatBox">
-                <div class="status">Connecting to AWS Agent...</div>
+            
+            <!-- Tab navigation -->
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('chat')">Chat</div>
+                <div class="tab" onclick="switchTab('terminal')">Terminal</div>
             </div>
-            <div class="input-group">
-                <input type="text" id="messageInput" placeholder="Ask me about AWS operations..." disabled>
-                <button id="sendButton" disabled>Send</button>
+            
+            <!-- Chat tab content -->
+            <div id="chat-tab" class="tab-content active">
+                <div class="chat-box" id="chatBox">
+                    <div class="status">Connecting to AWS Agent...</div>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="messageInput" placeholder="Ask me about AWS operations..." disabled>
+                    <button id="sendButton" disabled>Send</button>
+                </div>
+            </div>
+            
+            <!-- Terminal tab content -->
+            <div id="terminal-tab" class="tab-content">
+                <div class="terminal-container">
+                    <div class="terminal-header">
+                        <div class="terminal-title">Terminal</div>
+                        <div class="terminal-controls">
+                            <button class="terminal-btn" onclick="createTerminal()">New Session</button>
+                            <button class="terminal-btn" onclick="clearTerminal()">Clear</button>
+                            <button class="terminal-btn" onclick="closeTerminal()">Close</button>
+                        </div>
+                    </div>
+                    <div id="terminal"></div>
+                    <div class="terminal-status" id="terminalStatus">Click "New Session" to start</div>
+                </div>
             </div>
         </div>
         
@@ -208,6 +296,8 @@ async def get_home():
                         addMessage(data.content, 'agent');
                     } else if (data.type === 'error') {
                         addMessage('Error: ' + data.content, 'agent');
+                    } else if (data.type.startsWith('terminal_')) {
+                        handleTerminalMessage(data);
                     }
                 };
                 
@@ -304,6 +394,151 @@ async def get_home():
                 input.setSelectionRange(input.value.length, input.value.length);
             }
             
+            // Terminal functionality
+            let terminal = null;
+            let terminalSessionId = null;
+            let fitAddon = null;
+            
+            // Switch tabs
+            function switchTab(tabName) {
+                // Update tab buttons
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                
+                // Update tab content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(tabName + '-tab').classList.add('active');
+                
+                // Fit terminal if switching to terminal tab
+                if (tabName === 'terminal' && terminal && fitAddon) {
+                    setTimeout(() => fitAddon.fit(), 100);
+                }
+            }
+            
+            // Create terminal
+            function createTerminal() {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    updateTerminalStatus('WebSocket not connected');
+                    return;
+                }
+                
+                if (terminal) {
+                    terminal.dispose();
+                }
+                
+                // Create new terminal using the global Terminal from xterm.js
+                terminal = new window.Terminal({
+                    cursorBlink: true,
+                    fontSize: 14,
+                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                    theme: {
+                        background: '#1e1e1e',
+                        foreground: '#cccccc',
+                        cursor: '#ffffff',
+                        selection: '#ffffff40'
+                    }
+                });
+                
+                // Add fit addon
+                fitAddon = new window.FitAddon.FitAddon();
+                terminal.loadAddon(fitAddon);
+                
+                // Open terminal in DOM
+                terminal.open(document.getElementById('terminal'));
+                fitAddon.fit();
+                
+                // Handle terminal input
+                terminal.onData(data => {
+                    if (terminalSessionId && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'terminal_input',
+                            session_id: terminalSessionId,
+                            data: data
+                        }));
+                    }
+                });
+                
+                // Handle resize
+                terminal.onResize(size => {
+                    if (terminalSessionId && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'terminal_resize',
+                            session_id: terminalSessionId,
+                            rows: size.rows,
+                            cols: size.cols
+                        }));
+                    }
+                });
+                
+                // Request terminal session
+                const size = terminal.rows && terminal.cols ? 
+                    { rows: terminal.rows, cols: terminal.cols } : 
+                    { rows: 24, cols: 80 };
+                    
+                ws.send(JSON.stringify({
+                    type: 'terminal_create',
+                    rows: size.rows,
+                    cols: size.cols
+                }));
+                
+                updateTerminalStatus('Creating terminal session...');
+            }
+            
+            // Clear terminal
+            function clearTerminal() {
+                if (terminal) {
+                    terminal.clear();
+                }
+            }
+            
+            // Close terminal
+            function closeTerminal() {
+                if (terminalSessionId && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'terminal_close',
+                        session_id: terminalSessionId
+                    }));
+                }
+                
+                if (terminal) {
+                    terminal.dispose();
+                    terminal = null;
+                    fitAddon = null;
+                }
+                
+                terminalSessionId = null;
+                document.getElementById('terminal').innerHTML = '';
+                updateTerminalStatus('Terminal closed');
+            }
+            
+            // Update terminal status
+            function updateTerminalStatus(message) {
+                document.getElementById('terminalStatus').textContent = message;
+            }
+            
+            // Handle terminal messages in WebSocket
+            function handleTerminalMessage(data) {
+                if (data.type === 'terminal_created') {
+                    terminalSessionId = data.session_id;
+                    updateTerminalStatus('Terminal connected');
+                } else if (data.type === 'terminal_output' && terminal) {
+                    terminal.write(data.data);
+                } else if (data.type === 'terminal_closed') {
+                    closeTerminal();
+                }
+            }
+            
+            // Window resize handler
+            window.addEventListener('resize', () => {
+                if (terminal && fitAddon) {
+                    fitAddon.fit();
+                }
+            });
+            
             // Load command history on startup
             loadCommandHistory();
             connect();
@@ -325,8 +560,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         agent = SimpleAWSAgent(credential_manager=credential_manager)
         agents[session_id] = agent
         
-        # Create WebSocket handler
-        handler = WebSocketHandler(agent, websocket)
+        # Create WebSocket handler with terminal support
+        handler = WebSocketHandler(agent, websocket, terminal_manager, session_id)
         
         # Handle messages
         while True:
