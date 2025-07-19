@@ -7,6 +7,8 @@ from pydantic import Field
 import logging
 
 from ...credentials.manager import AWSCredentialManager
+from .client_pool import s3_client_pool
+from .validators import validate_bucket_name, validate_object_key, validate_s3_path
 
 
 logger = logging.getLogger(__name__)
@@ -22,9 +24,15 @@ class S3BaseTool(BaseTool, ABC):
     )
     
     def _get_s3_client(self, profile: Optional[str] = None):
-        """Get S3 client with proper credentials."""
+        """Get S3 client with proper credentials using connection pool."""
         profile = profile or self.profile
-        return self.credential_manager.create_client("s3", profile)
+        try:
+            # Try to use the connection pool first
+            return s3_client_pool.get_client(profile)
+        except Exception as e:
+            # Fallback to creating a new client if pool fails
+            logger.warning(f"Failed to get client from pool: {e}. Creating new client.")
+            return self.credential_manager.create_client("s3", profile)
     
     def _get_s3_resource(self, profile: Optional[str] = None):
         """Get S3 resource with proper credentials."""

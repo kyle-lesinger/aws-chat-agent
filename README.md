@@ -102,11 +102,12 @@ export PATH="$HOME/.local/bin:$PATH"  # Add to ~/.bashrc or ~/.zshrc
 The agent requires an OpenAI API key to function. Set it up using one of these methods:
 
 ```bash
-# Method 1: Environment variable (recommended)
-export OPENAI_API_KEY="sk-your-api-key-here"
+# Method 1: Copy the example environment file (recommended)
+cp .env.example .env
+# Edit .env and update OPENAI_API_KEY with your actual key
 
-# Method 2: .env file
-echo "OPENAI_API_KEY=sk-your-api-key-here" > .env
+# Method 2: Environment variable
+export OPENAI_API_KEY="sk-your-api-key-here"
 
 # Method 3: Pass directly to the agent
 aws-agent chat --api-key "sk-your-api-key-here" "List S3 buckets"
@@ -148,6 +149,23 @@ role_arn = arn:aws:iam::123456789012:role/MyRole
 source_profile = default
 EOF
 ```
+
+### 3. Encrypting Credentials (Optional)
+
+For enhanced security, you can encrypt credentials stored in `aws_config.yml`:
+
+```bash
+# Set encryption password (or it will use a temporary key)
+export AWS_AGENT_ENCRYPTION_KEY="your-secure-password"
+
+# Encrypt existing config file
+python -m aws_agent.credentials.encrypt_config aws_config.yml
+
+# Or specify encryption key directly
+python -m aws_agent.credentials.encrypt_config aws_config.yml -k "your-password"
+```
+
+Encrypted credentials will have an `ENC:` prefix and are automatically decrypted when used.
 
 ## Usage
 
@@ -281,6 +299,27 @@ Security options:
 - **Blacklist mode**: Use `blocked_commands` to block dangerous commands
 - **Environment sanitization**: Sensitive env vars are automatically removed
 
+### Security Features
+
+The AWS Agent includes several security enhancements:
+
+- **Credential Encryption**: AWS credentials in config files can be encrypted using Fernet encryption
+- **Input Validation**: All S3 bucket names and paths are validated to prevent injection attacks
+- **CORS Protection**: Web interface restricted to localhost origins only
+- **Path Traversal Protection**: Prevents directory traversal attempts in S3 operations
+- **Terminal Security**: Command filtering and environment variable sanitization
+- **API Key Authentication**: Optional WebSocket authentication (currently disabled)
+
+### Performance Optimizations
+
+Recent performance improvements include:
+
+- **Connection Pooling**: S3 client connections are reused across operations
+- **Progress Tracking**: File transfers over 1MB show real-time progress
+- **Async Operations**: Non-blocking I/O for better responsiveness
+- **Efficient Pagination**: Smart handling of large S3 listings
+- **Resource Management**: Automatic cleanup of expired sessions
+
 ### Adding New AWS Services
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for instructions on extending the agent with new AWS service support.
@@ -302,13 +341,21 @@ aws_agent/
 │       ├── list_objects.py
 │       ├── download_file.py
 │       ├── upload_file.py
-│       └── file_transfer.py
+│       ├── file_transfer.py
+│       ├── client_pool.py    # Connection pooling
+│       ├── validators.py     # Input validation
+│       ├── progress.py       # Progress tracking
+│       └── create_directory.py
 ├── credentials/       # Credential management
 │   ├── manager.py    # Main credential manager
-│   └── providers.py  # Various credential providers
+│   ├── providers.py  # Various credential providers
+│   ├── encryption.py # Credential encryption
+│   └── encrypt_config.py # Encryption utility
 ├── chat/             # Web interface
 │   ├── server.py     # FastAPI server
-│   └── websocket.py  # WebSocket handling
+│   ├── websocket.py  # WebSocket handling
+│   ├── terminal.py   # Terminal emulator
+│   └── auth.py       # Authentication (optional)
 └── cli/              # Command-line interface
     └── main.py       # CLI entry point
 ```
@@ -316,9 +363,11 @@ aws_agent/
 ### Key Components
 
 - **Core Agent**: LangChain/LangGraph-based reasoning engine with GPT-3.5
-- **Tool System**: Specialized tools for each AWS operation
-- **Credential Manager**: Secure handling of multiple AWS credential sources
-- **Chat Interface**: Real-time WebSocket communication with command history
+- **Tool System**: Specialized tools for each AWS operation with validation and progress tracking
+- **Credential Manager**: Secure handling of multiple AWS credential sources with encryption support
+- **Connection Pool**: Efficient reuse of AWS client connections
+- **Chat Interface**: Real-time WebSocket communication with command history and terminal emulation
+- **Security Layer**: Input validation, CORS protection, and credential encryption
 - **CLI**: Command-line interface for quick operations
 
 ## Supported AWS Services

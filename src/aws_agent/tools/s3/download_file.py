@@ -5,6 +5,8 @@ from pathlib import Path
 from langchain_core.pydantic_v1 import BaseModel, Field
 
 from .base import S3BaseTool
+from .progress import ProgressPercentage, format_bytes
+from .validators import validate_bucket_name, validate_object_key
 
 
 class DownloadFromS3Input(BaseModel):
@@ -34,8 +36,9 @@ class DownloadFromS3Tool(S3BaseTool):
     ) -> str:
         """Download file from S3."""
         try:
-            # Strip trailing slashes from bucket name
-            bucket = bucket.rstrip('/')
+            # Validate inputs
+            bucket = validate_bucket_name(bucket)
+            key = validate_object_key(key)
             
             # Expand user home directory (~)
             local_file = Path(local_path).expanduser()
@@ -50,12 +53,22 @@ class DownloadFromS3Tool(S3BaseTool):
             file_size = response['ContentLength']
             content_type = response.get('ContentType', 'binary/octet-stream')
             
-            # Download file
-            s3_client.download_file(bucket, key, str(local_file))
+            # Create progress callback
+            progress_callback = None
+            if file_size > 1024 * 1024:  # Show progress for files > 1MB
+                progress_callback = ProgressPercentage(str(local_file.name), file_size)
+            
+            # Download file with progress
+            s3_client.download_file(
+                bucket, 
+                key, 
+                str(local_file),
+                Callback=progress_callback
+            )
             
             return (
                 f"Successfully downloaded s3://{bucket}/{key} to '{local_file}'\n"
-                f"File size: {file_size:,} bytes\n"
+                f"File size: {format_bytes(file_size)}\n"
                 f"Content type: {content_type}\n"
                 f"Profile: {profile or self.profile or 'default'}"
             )

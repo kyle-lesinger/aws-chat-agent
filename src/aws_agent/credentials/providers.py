@@ -11,6 +11,9 @@ from dataclasses import dataclass
 import keyring
 from cryptography.fernet import Fernet
 import boto3
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -171,14 +174,26 @@ class ConfigFileProvider(CredentialProvider):
     
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path or Path("aws_config.yml")
+        self._encryption = None
+    
+    def _get_encryption(self):
+        """Lazy load encryption module to avoid circular imports."""
+        if self._encryption is None:
+            from .encryption import credential_encryption
+            self._encryption = credential_encryption
+        return self._encryption
     
     def get_credentials(self, profile: Optional[str] = None) -> Optional[AWSCredentials]:
         """Get credentials from custom config file."""
         if not self.config_path.exists():
             return None
         
-        with open(self.config_path, 'r') as f:
-            config = yaml.safe_load(f)
+        try:
+            with open(self.config_path, 'r') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load config file: {e}")
+            return None
         
         if not config:
             return None
@@ -192,10 +207,13 @@ class ConfigFileProvider(CredentialProvider):
         
         profile_config = profiles[profile]
         
-        # Check if credentials are encrypted
-        if profile_config.get("encrypted"):
-            # Would need to implement decryption logic
-            return None
+        # Decrypt profile config if it contains encrypted fields
+        try:
+            encryption = self._get_encryption()
+            profile_config = encryption.decrypt_dict(profile_config)
+        except Exception as e:
+            logger.warning(f"Failed to decrypt credentials: {e}")
+            # Continue with unencrypted values
         
         return AWSCredentials(
             access_key_id=profile_config.get("access_key_id"),

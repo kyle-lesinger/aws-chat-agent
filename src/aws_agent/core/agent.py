@@ -48,8 +48,15 @@ class AWSAgent:
         config_path = config_path or Path("aws_config.yml")
         config = {}
         if Path(config_path).exists():
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f) or {}
+            try:
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                logger.error(f"Invalid YAML in config file {config_path}: {e}")
+                config = {}
+            except Exception as e:
+                logger.error(f"Error loading config file {config_path}: {e}")
+                config = {}
         
         # Get agent config
         agent_config = config.get("agent", {})

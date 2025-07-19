@@ -54,8 +54,10 @@ class ListS3ObjectsTool(S3BaseTool):
     ) -> str:
         """List objects in S3 bucket with formatted output."""
         try:
-            # Strip trailing slashes from bucket name
-            bucket = bucket.rstrip('/')
+            # Validate and clean bucket name
+            from .validators import validate_bucket_name, validate_object_key
+            bucket = validate_bucket_name(bucket)
+            prefix = validate_object_key(prefix) if prefix else ""
             
             s3_client = self._get_s3_client(profile)
             
