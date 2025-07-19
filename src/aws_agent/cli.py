@@ -53,10 +53,11 @@ def chat(message: str, profile: Optional[str], config: Optional[Path]):
 @click.option('--host', '-h', default='0.0.0.0', help='Server host')
 @click.option('--port', '-p', default=8000, type=int, help='Server port')
 @click.option('--reload', is_flag=True, help='Enable auto-reload')
-def server(host: str, port: int, reload: bool):
+@click.option('--no-browser', is_flag=True, help='Do not open browser automatically')
+def server(host: str, port: int, reload: bool, no_browser: bool):
     """Start the AWS Agent chat server."""
     click.echo(f"Starting AWS Agent Chat Server on {host}:{port}")
-    start_server(host=host, port=port, reload=reload)
+    start_server(host=host, port=port, reload=reload, no_browser=no_browser)
 
 
 @main.command()
