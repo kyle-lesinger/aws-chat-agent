@@ -23,7 +23,7 @@ A specialized AWS agent built with LangChain and LangGraph for comprehensive AWS
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/aws_agent.git
+git clone https://github.com/kyle-lesinger/aws-chat-agent.git
 cd aws_agent
 ```
 
@@ -36,7 +36,7 @@ pip install -e .
 
 #### Using pip from GitHub:
 ```bash
-pip install git+https://github.com/yourusername/aws_agent.git
+pip install git+https://github.com/kyle-lesinger/aws-chat-agent.git
 ```
 
 #### Using Poetry:
