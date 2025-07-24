@@ -1,10 +1,11 @@
 """Tool for listing S3 buckets."""
 
 from typing import Any, Optional, Type
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 import json
 
 from .base import S3BaseTool
+from ...credentials.providers import MFARequiredException
 
 
 class ListS3BucketsInput(BaseModel):
@@ -43,6 +44,9 @@ class ListS3BucketsTool(S3BaseTool):
             
             return json.dumps(result, indent=2)
             
+        except MFARequiredException:
+            # Re-raise MFA exception to be handled by the application
+            raise
         except Exception as e:
             return self._handle_error(e, "listing S3 buckets")
     

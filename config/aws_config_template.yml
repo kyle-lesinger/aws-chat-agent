@@ -25,6 +25,23 @@ profiles:
     encrypted: true
     # Credentials will be stored in system keyring
     region: eu-west-1
+    
+  # Example profile requiring MFA for temporary credentials
+  smce-veda:
+    # Base credentials from AWS CLI profile
+    use_aws_profile: true
+    aws_profile_name: smce-veda
+    region: us-west-2
+    # Enable MFA for this profile - will prompt for code and generate 12-hour temp credentials
+    requires_mfa: true
+    
+  # Another MFA-enabled profile example
+  production-mfa:
+    access_key_id: YOUR_ACCESS_KEY_HERE
+    secret_access_key: YOUR_SECRET_KEY_HERE
+    region: us-east-1
+    # MFA required - temporary credentials will be generated automatically
+    requires_mfa: true
 
 # Agent configuration
 agent:

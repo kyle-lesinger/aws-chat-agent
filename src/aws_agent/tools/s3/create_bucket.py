@@ -1,9 +1,10 @@
 """Tool for creating S3 buckets."""
 
 from typing import Any, Optional, Type
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 
 from .base import S3BaseTool
+from ...credentials.providers import MFARequiredException
 
 
 class CreateS3BucketInput(BaseModel):
@@ -66,7 +67,18 @@ class CreateS3BucketTool(S3BaseTool):
                 f"Profile: {profile or self.profile or 'default'}"
             )
             
+        except MFARequiredException:
+
+            
+            # Re-raise MFA exception to be handled by the application
+
+            
+            raise
+
+            
         except Exception as e:
+
+            
             return self._handle_error(e, f"creating bucket '{bucket_name}'")
     
     async def _arun(

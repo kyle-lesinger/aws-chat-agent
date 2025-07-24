@@ -2,12 +2,13 @@
 
 from typing import Any, Optional, Type
 from pathlib import Path
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 import mimetypes
 
 from .base import S3BaseTool
 from .progress import ProgressPercentage, format_bytes
 from .validators import validate_bucket_name, validate_object_key
+from ...credentials.providers import MFARequiredException
 
 
 class UploadToS3Input(BaseModel):
@@ -82,6 +83,9 @@ class UploadToS3Tool(S3BaseTool):
                 f"Profile: {profile or self.profile or 'default'}"
             )
             
+        except MFARequiredException:
+            # Re-raise MFA exception to be handled by the application
+            raise
         except Exception as e:
             return self._handle_error(e, f"uploading '{local_path}' to s3://{bucket}/{key}")
     

@@ -8,6 +8,8 @@ import asyncio
 
 from ..core.simple_agent import SimpleAWSAgent
 from .terminal import TerminalManager
+from ..credentials.providers import MFARequiredException
+import uuid
 
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ class WebSocketHandler:
     async def handle_message(self, data: dict):
         """Handle incoming WebSocket message."""
         message_type = data.get("type", "message")
+        logger.info(f"WebSocket received message type: {message_type}")
         
         try:
             if message_type == "message":
@@ -99,6 +102,7 @@ class WebSocketHandler:
                     await self._send_error(f"Invalid profile: {profile}")
                     return
                 self.agent.profile = profile
+                self.agent._update_tools_profile()
             except Exception as e:
                 await self._send_error(f"Invalid profile: {e}")
                 return
@@ -108,9 +112,43 @@ class WebSocketHandler:
         
         # Get response from agent
         try:
+            logger.info(f"WebSocketHandler: About to call agent.achat with profile={profile}")
             response = await self.agent.achat(content, profile)
+            logger.info(f"WebSocketHandler: Got response from agent: {response[:100]}")
+            
+            # If we had an MFA request before and now succeeded, send complete status
+            if hasattr(self, '_had_mfa_request') and self._had_mfa_request:
+                await self.websocket.send_json({
+                    "type": "mfa_terminal_status",
+                    "status": "complete"
+                })
+                self._had_mfa_request = False
+                
             await self._send_message(response)
+        except MFARequiredException as e:
+            logger.info(f"WebSocketHandler: Caught MFARequiredException! Profile={e.profile}, Device={e.mfa_device}")
+            
+            # Mark that we had an MFA request
+            self._had_mfa_request = True
+            
+            # Send MFA status update to UI
+            await self.websocket.send_json({
+                "type": "mfa_terminal_status",
+                "status": "required",
+                "profile": e.profile,
+                "mfa_device": e.mfa_device
+            })
+            
+            # Send clear message to user
+            await self._send_message(
+                f"⚠️ **MFA Required**\n\n"
+                f"Please check your terminal window and enter your 6-digit MFA code.\n\n"
+                f"Profile: `{e.profile}`\n"
+                f"Device: `{e.mfa_device}`",
+                msg_type="warning"
+            )
         except Exception as e:
+            logger.error(f"WebSocketHandler: Caught general exception: {type(e).__name__}: {e}")
             await self._send_error(f"Agent error: {e}")
     
     async def _handle_get_profiles(self):
@@ -137,7 +175,13 @@ class WebSocketHandler:
                 await self._send_error(f"Profile '{profile}' not found")
                 return
             self.agent.profile = profile
+            self.agent._update_tools_profile()
             await self._send_message(f"Switched to AWS profile: {profile}", msg_type="info")
+        except MFARequiredException as e:
+            # Profile exists but requires MFA - just set it
+            self.agent.profile = profile
+            self.agent._update_tools_profile()
+            await self._send_message(f"Switched to AWS profile: {profile} (MFA will be required for operations)", msg_type="info")
         except Exception as e:
             await self._send_error(str(e))
     

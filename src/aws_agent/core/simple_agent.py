@@ -14,6 +14,9 @@ from langchain_core.tools import BaseTool
 
 from ..tools import get_aws_tools
 from ..credentials.manager import AWSCredentialManager
+from ..credentials.providers import MFARequiredException
+from .mfa_agent_executor import MFAAgentExecutor
+from ..tools.mfa_wrapper import MFAStatus
 
 SYSTEM_PROMPT = """You are an AWS Agent specialized in helping users manage AWS services.
 
@@ -103,6 +106,9 @@ class SimpleAWSAgent:
         # Get tools
         self.tools = tools or get_aws_tools(self.credential_manager)
         
+        # Set profile on all tools
+        self._update_tools_profile()
+        
         # Create prompt
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
@@ -114,12 +120,13 @@ class SimpleAWSAgent:
         # Create agent
         agent = create_openai_tools_agent(self.llm, self.tools, self.prompt)
         
-        # Create executor
-        self.executor = AgentExecutor(
+        # Create executor with MFA support
+        self.executor = MFAAgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=True,
-            handle_parsing_errors=True
+            handle_parsing_errors=True,
+            return_intermediate_steps=True
         )
         
         # Chat history
@@ -129,6 +136,11 @@ class SimpleAWSAgent:
         """Send a message to the agent and get a response."""
         # Use specified profile or default
         current_profile = profile or self.profile
+        
+        # Update profile on tools if different
+        if current_profile != self.profile:
+            self.profile = current_profile
+            self._update_tools_profile()
         
         # Add profile to context if specified
         if current_profile and current_profile != "default":
@@ -141,12 +153,38 @@ class SimpleAWSAgent:
                 "chat_history": self.chat_history[-10:]  # Keep last 10 messages
             })
             
+            # Check intermediate steps for MFA status
+            if "intermediate_steps" in result:
+                for action, observation in result["intermediate_steps"]:
+                    if isinstance(observation, str) and MFAStatus.is_mfa_response(observation):
+                        # Extract MFA data and raise exception
+                        mfa_data = MFAStatus.parse_mfa_response(observation)
+                        if mfa_data:
+                            raise MFARequiredException(
+                                mfa_data["profile"],
+                                mfa_data["mfa_device"]
+                            )
+            
+            # Also check if the output contains MFA status
+            output = result["output"]
+            if MFAStatus.is_mfa_response(output):
+                # Extract MFA data and raise exception
+                mfa_data = MFAStatus.parse_mfa_response(output)
+                if mfa_data:
+                    raise MFARequiredException(
+                        mfa_data["profile"],
+                        mfa_data["mfa_device"]
+                    )
+            
             # Update history
             self.chat_history.append(HumanMessage(content=message))
-            self.chat_history.append(AIMessage(content=result["output"]))
+            self.chat_history.append(AIMessage(content=output))
             
-            return result["output"]
+            return output
             
+        except MFARequiredException:
+            # Re-raise MFA exception to be handled by the application
+            raise
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             self.chat_history.append(HumanMessage(content=message))
@@ -157,7 +195,67 @@ class SimpleAWSAgent:
         """Clear chat history."""
         self.chat_history = []
     
+    def _update_tools_profile(self):
+        """Update profile on all tools."""
+        for tool in self.tools:
+            if hasattr(tool, 'profile'):
+                tool.profile = self.profile
+    
     async def achat(self, message: str, profile: Optional[str] = None) -> str:
         """Async version of chat."""
-        # For now, just use sync version
-        return self.chat(message, profile)
+        # Use specified profile or default
+        current_profile = profile or self.profile
+        
+        # Update profile on tools if different
+        if current_profile != self.profile:
+            self.profile = current_profile
+            self._update_tools_profile()
+        
+        # Add profile to context if specified
+        if current_profile and current_profile != "default":
+            message = f"[Using AWS profile: {current_profile}] {message}"
+        
+        try:
+            # Run agent asynchronously
+            result = await self.executor.ainvoke({
+                "input": message,
+                "chat_history": self.chat_history[-10:]  # Keep last 10 messages
+            })
+            
+            # Check intermediate steps for MFA status
+            if "intermediate_steps" in result:
+                for action, observation in result["intermediate_steps"]:
+                    if isinstance(observation, str) and MFAStatus.is_mfa_response(observation):
+                        # Extract MFA data and raise exception
+                        mfa_data = MFAStatus.parse_mfa_response(observation)
+                        if mfa_data:
+                            raise MFARequiredException(
+                                mfa_data["profile"],
+                                mfa_data["mfa_device"]
+                            )
+            
+            # Also check if the output contains MFA status
+            output = result["output"]
+            if MFAStatus.is_mfa_response(output):
+                # Extract MFA data and raise exception
+                mfa_data = MFAStatus.parse_mfa_response(output)
+                if mfa_data:
+                    raise MFARequiredException(
+                        mfa_data["profile"],
+                        mfa_data["mfa_device"]
+                    )
+            
+            # Update history
+            self.chat_history.append(HumanMessage(content=message))
+            self.chat_history.append(AIMessage(content=output))
+            
+            return output
+            
+        except MFARequiredException:
+            # Re-raise MFA exception to be handled by the application
+            raise
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            self.chat_history.append(HumanMessage(content=message))
+            self.chat_history.append(AIMessage(content=error_msg))
+            return error_msg

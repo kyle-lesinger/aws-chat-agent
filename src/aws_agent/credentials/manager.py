@@ -14,7 +14,10 @@ from .providers import (
     ProfileProvider,
     ConfigFileProvider,
     KeyringProvider,
-    IAMRoleProvider
+    IAMRoleProvider,
+    STSProvider,
+    MFAAwareProfileProvider,
+    MFARequiredException
 )
 
 
@@ -38,19 +41,32 @@ class AWSCredentialManager:
         self.config_path = Path(config_path) if config_path else Path("aws_config.yml")
         
         # Initialize providers in order of precedence
-        self.providers = providers or [
-            EnvironmentProvider(),
-            ProfileProvider(),
-            ConfigFileProvider(self.config_path),
-            KeyringProvider(),
-            IAMRoleProvider()
-        ]
+        if providers:
+            self.providers = providers
+        else:
+            # Create base providers
+            profile_provider = ProfileProvider()  # Use regular ProfileProvider for STS base
+            mfa_aware_profile_provider = MFAAwareProfileProvider()  # Use MFA-aware for direct access
+            config_provider = ConfigFileProvider(self.config_path)
+            
+            self.providers = [
+                EnvironmentProvider(),
+                STSProvider(profile_provider),  # STS provider with ProfileProvider as base
+                STSProvider(config_provider),   # STS provider with ConfigFileProvider as base
+                profile_provider,               # Regular ProfileProvider for non-MFA profiles
+                config_provider,                # ConfigFileProvider for config-based profiles
+                KeyringProvider(),
+                IAMRoleProvider()
+            ]
         
         # Cache for credentials
         self._credentials_cache: Dict[str, AWSCredentials] = {}
         
         # Default profile
         self._default_profile = None
+        
+        # MFA callback
+        self._mfa_callback = None
     
     def get_credentials(self, profile: Optional[str] = None) -> Optional[AWSCredentials]:
         """Get AWS credentials for the specified profile.
@@ -62,6 +78,7 @@ class AWSCredentialManager:
             AWS credentials or None if not found
         """
         profile = profile or self._default_profile or "default"
+        logger.info(f"AWSCredentialManager.get_credentials called for profile '{profile}'")
         
         # Check cache first
         if profile in self._credentials_cache:
@@ -69,7 +86,9 @@ class AWSCredentialManager:
         
         # Try each provider in order
         for provider in self.providers:
+            logger.debug(f"Trying provider {provider.__class__.__name__} for profile '{profile}'")
             if not provider.is_available():
+                logger.debug(f"Provider {provider.__class__.__name__} is not available")
                 continue
             
             try:
@@ -78,6 +97,12 @@ class AWSCredentialManager:
                     logger.info(f"Got credentials for profile '{profile}' from {provider.__class__.__name__}")
                     self._credentials_cache[profile] = credentials
                     return credentials
+                else:
+                    logger.debug(f"Provider {provider.__class__.__name__} returned no credentials for profile '{profile}'")
+            except MFARequiredException as e:
+                # Re-raise MFA exception to be handled by caller
+                logger.info(f"MFA required for profile '{profile}': {e}")
+                raise
             except Exception as e:
                 logger.warning(f"Failed to get credentials from {provider.__class__.__name__}: {e}")
         
@@ -144,28 +169,34 @@ class AWSCredentialManager:
         
         # Check each provider for available profiles
         for provider in self.providers:
-            if isinstance(provider, ProfileProvider) and provider.is_available():
-                profiles.update(provider.list_profiles())
+            if isinstance(provider, (ProfileProvider, MFAAwareProfileProvider)) and provider.is_available():
+                try:
+                    provider_profiles = provider.list_profiles()
+                    profiles.update(provider_profiles)
+                    logger.debug(f"Found {len(provider_profiles)} profiles from {provider.__class__.__name__}")
+                except Exception as e:
+                    logger.warning(f"Error listing profiles from {provider.__class__.__name__}: {e}")
             elif isinstance(provider, ConfigFileProvider) and provider.is_available():
                 # Parse config file for profiles
                 try:
-                    import yaml
-                    with open(provider.config_path, 'r') as f:
-                        config = yaml.safe_load(f)
-                        if config and "profiles" in config:
-                            profiles.update(config["profiles"].keys())
-                except Exception:
-                    pass
+                    provider_profiles = provider.list_profiles()
+                    profiles.update(provider_profiles)
+                    logger.debug(f"Found {len(provider_profiles)} profiles from ConfigFileProvider")
+                except Exception as e:
+                    logger.warning(f"Error listing profiles from ConfigFileProvider: {e}")
         
-        # Add default if we have any credentials
-        if self.get_credentials("default"):
-            profiles.add("default")
+        # Always include default
+        profiles.add("default")
         
         return sorted(list(profiles))
     
     def has_profile(self, profile: str) -> bool:
         """Check if a profile exists."""
-        return self.get_credentials(profile) is not None
+        try:
+            return self.get_credentials(profile) is not None
+        except MFARequiredException:
+            # Profile exists but requires MFA
+            return True
     
     def set_default_profile(self, profile: str) -> None:
         """Set the default profile."""
@@ -232,3 +263,46 @@ class AWSCredentialManager:
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
             return None
+    
+    def set_mfa_callback(self, callback):
+        """Set MFA callback for interactive MFA prompts.
+        
+        Args:
+            callback: Function that takes (profile, mfa_device) and returns MFA code
+        """
+        self._mfa_callback = callback
+        
+        # Update STS providers with the callback
+        for provider in self.providers:
+            if isinstance(provider, STSProvider):
+                provider._mfa_callback = callback
+                logger.info(f"Set MFA callback on {provider.__class__.__name__}")
+    
+    def get_credentials_with_mfa(self, profile: str, mfa_code: str) -> Optional[AWSCredentials]:
+        """Get credentials for a profile with MFA code.
+        
+        Args:
+            profile: AWS profile name
+            mfa_code: MFA code from user
+            
+        Returns:
+            AWS credentials or None
+        """
+        # Create a temporary callback that returns the provided code
+        def mfa_callback(p, d):
+            return mfa_code
+        
+        # Temporarily set the callback
+        old_callback = self._mfa_callback
+        self.set_mfa_callback(mfa_callback)
+        
+        try:
+            # Clear cache to force fresh credential fetch
+            if profile in self._credentials_cache:
+                del self._credentials_cache[profile]
+            
+            # Get credentials
+            return self.get_credentials(profile)
+        finally:
+            # Restore old callback
+            self.set_mfa_callback(old_callback)

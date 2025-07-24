@@ -1,9 +1,10 @@
 """Tool for creating directories (folders) in S3."""
 
 from typing import Any, Optional, Type
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 
 from .base import S3BaseTool
+from ...credentials.providers import MFARequiredException
 
 
 class CreateS3DirectoryInput(BaseModel):
@@ -58,7 +59,18 @@ class CreateS3DirectoryTool(S3BaseTool):
                 f"Profile: {profile or self.profile or 'default'}"
             )
             
+        except MFARequiredException:
+
+            
+            # Re-raise MFA exception to be handled by the application
+
+            
+            raise
+
+            
         except Exception as e:
+
+            
             return self._handle_error(e, f"creating directory '{directory_path}' in bucket '{bucket}'")
     
     async def _arun(

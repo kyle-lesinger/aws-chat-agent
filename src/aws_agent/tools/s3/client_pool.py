@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import boto3
 from botocore.client import BaseClient
 import logging
+from ...credentials.manager import AWSCredentialManager
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ class S3ClientPool:
     _instance = None
     _lock = threading.Lock()
     _clients: Dict[str, BaseClient] = {}
+    _credential_manager: Optional[AWSCredentialManager] = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -52,9 +54,17 @@ class S3ClientPool:
             # Double-check in case another thread created it
             if key not in self._clients:
                 try:
-                    session = boto3.Session(profile_name=profile)
-                    self._clients[key] = session.client('s3', region_name=region)
-                    logger.debug(f"Created new S3 client for {key}")
+                    if self._credential_manager:
+                        # Use credential manager if available (handles MFA)
+                        logger.info(f"Creating S3 client for profile '{profile}' using credential manager")
+                        self._clients[key] = self._credential_manager.create_client('s3', profile)
+                        logger.info(f"Successfully created S3 client for {key} using credential manager")
+                    else:
+                        # Fallback to direct boto3 session
+                        logger.warning(f"No credential manager set, falling back to boto3.Session for profile '{profile}'")
+                        session = boto3.Session(profile_name=profile)
+                        self._clients[key] = session.client('s3', region_name=region)
+                        logger.info(f"Created S3 client for {key} using boto3 session")
                 except Exception as e:
                     logger.error(f"Failed to create S3 client for {key}: {e}")
                     raise
@@ -79,6 +89,16 @@ class S3ClientPool:
             if key in self._clients:
                 del self._clients[key]
                 logger.debug(f"Removed S3 client for {key}")
+    
+    def set_credential_manager(self, credential_manager: AWSCredentialManager):
+        """Set the credential manager for the pool.
+        
+        Args:
+            credential_manager: AWS credential manager instance
+        """
+        self._credential_manager = credential_manager
+        # Clear existing clients to force recreation with new manager
+        self.clear()
 
 
 # Global instance

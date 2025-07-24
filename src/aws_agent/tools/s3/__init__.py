@@ -12,6 +12,7 @@ from .delete_object import DeleteS3ObjectTool
 from .file_transfer import S3FileTransferTool
 from .create_directory import CreateS3DirectoryTool
 from ...credentials.manager import AWSCredentialManager
+from .client_pool import s3_client_pool
 
 
 def get_s3_tools(credential_manager: AWSCredentialManager) -> List[BaseTool]:
@@ -23,6 +24,9 @@ def get_s3_tools(credential_manager: AWSCredentialManager) -> List[BaseTool]:
     Returns:
         List of S3 tools
     """
+    # Set credential manager on the client pool
+    s3_client_pool.set_credential_manager(credential_manager)
+    
     return [
         ListS3BucketsTool(credential_manager=credential_manager),
         ListS3ObjectsTool(credential_manager=credential_manager),

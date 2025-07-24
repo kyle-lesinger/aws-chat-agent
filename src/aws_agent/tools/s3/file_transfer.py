@@ -2,11 +2,12 @@
 
 from typing import Any, Optional, Type, List
 from pathlib import Path
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 import os
 import fnmatch
 
 from .base import S3BaseTool
+from ...credentials.providers import MFARequiredException
 
 
 class S3FileTransferInput(BaseModel):
@@ -301,7 +302,18 @@ class S3FileTransferTool(S3BaseTool):
             
             return summary
             
+        except MFARequiredException:
+
+            
+            # Re-raise MFA exception to be handled by the application
+
+            
+            raise
+
+            
         except Exception as e:
+
+            
             return self._handle_error(e, f"transferring files from '{source}' to '{destination}'")
     
     async def _arun(

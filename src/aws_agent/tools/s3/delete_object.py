@@ -1,9 +1,10 @@
 """Tool for deleting S3 objects."""
 
 from typing import Any, Optional, Type
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 
 from .base import S3BaseTool
+from ...credentials.providers import MFARequiredException
 
 
 class DeleteS3ObjectInput(BaseModel):
@@ -64,7 +65,18 @@ class DeleteS3ObjectTool(S3BaseTool):
                     # Key already ends with /, object truly doesn't exist
                     return f"Object s3://{bucket}/{key} does not exist"
             
+        except MFARequiredException:
+
+            
+            # Re-raise MFA exception to be handled by the application
+
+            
+            raise
+
+            
         except Exception as e:
+
+            
             return self._handle_error(e, f"deleting s3://{bucket}/{key}")
     
     async def _arun(
